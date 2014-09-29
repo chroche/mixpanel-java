@@ -174,6 +174,24 @@ public class MPExport {
         return doRequestJSONObject("events/properties/top", params);
     }
 
+    public JSONObject engage(String where, String session_id, int page) throws MPException {
+        Map<String, Object> params = getParams();
+
+        if (where != null) {
+            params.put("where", where);
+        }
+
+        if (session_id != null) {
+            params.put("session_id", session_id);
+        }
+
+        if (page > -1) {
+            params.put("page", page);
+        }
+
+        return doRequestJSONObject("engage", params);
+    }
+
     private List<JSONObject> doRequestRawJSONObject(String path, Map<String, Object> params) throws MPException {
         try {
             String resp = doRequest(path, params);
@@ -190,7 +208,6 @@ public class MPExport {
             throw new MPException(e);
         }
     }
-
 
     private JSONObject doRequestJSONObject(String path, Map<String, Object> params) throws MPException {
         try {
