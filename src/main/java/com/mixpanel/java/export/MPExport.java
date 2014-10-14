@@ -3,16 +3,11 @@ package com.mixpanel.java.export;
 
 import com.mixpanel.java.MPException;
 import com.mixpanel.java.mpmetrics.MPConfig;
-import com.mixpanel.java.util.StringUtils;
+import com.mixpanel.java.util.StreamIterator;
 import org.apache.commons.codec.binary.Hex;
-import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIUtils;
 import org.apache.http.client.utils.URLEncodedUtils;
-import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -44,19 +39,20 @@ public class MPExport {
     }
 
     // Exporting raw data you inserted into Mixpanel
-    public List<JSONObject> export(Date fromDate, Date toDate) throws MPException {
+    public StreamIterator export(Date fromDate, Date toDate) throws MPException {
         return this.export(fromDate, toDate, null, null, null);
     }
 
-    public List<JSONObject> export(Date fromDate, Date toDate, String event) throws MPException {
+    public StreamIterator export(Date fromDate, Date toDate, String event) throws MPException {
         return this.export(fromDate, toDate, Arrays.asList(event), null, null);
     }
 
-    public List<JSONObject> export(Date fromDate, Date toDate, List<String> events) throws MPException {
+    public StreamIterator export(Date fromDate, Date toDate, List<String> events) throws MPException {
         return this.export(fromDate, toDate, events, null, null);
     }
 
-    public List<JSONObject> export(Date fromDate, Date toDate, List<String> events, String where, String bucket) throws MPException {
+    public StreamIterator export(Date fromDate, Date toDate, List<String> events, String where, String bucket) throws MPException {
+
         Map<String, Object> params = getParams();
 
         if (events != null) {
@@ -72,14 +68,16 @@ public class MPExport {
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
         params.put("from_date", dateFormat.format(fromDate));
         params.put("to_date", dateFormat.format(toDate));
+
         if (where != null) {
             params.put("where", where);
         }
+
         if (bucket != null) {
             params.put("bucket", bucket);
         }
 
-        return doRequestRawJSONObject("export", params);
+        return doRequest("export", params);
     }
 
     public JSONObject events(String event, MPExportType type, MPExportUnit unit, int interval) throws MPException {
@@ -192,26 +190,10 @@ public class MPExport {
         return doRequestJSONObject("engage", params);
     }
 
-    private List<JSONObject> doRequestRawJSONObject(String path, Map<String, Object> params) throws MPException {
-        try {
-            String resp = doRequest(path, params);
-            if (resp == null || resp.trim().isEmpty()) {
-                return Collections.emptyList();
-            } else {
-                List<JSONObject> jsonObjects = new ArrayList<JSONObject>();
-                for (String jsonString : resp.split("\n")) {
-                    jsonObjects.add(new JSONObject(jsonString));
-                }
-                return jsonObjects;
-            }
-        } catch (JSONException e) {
-            throw new MPException(e);
-        }
-    }
-
     private JSONObject doRequestJSONObject(String path, Map<String, Object> params) throws MPException {
+
         try {
-            String resp = doRequest(path, params);
+            String resp = doRequest(path, params).next();
             return resp == null || resp.trim().isEmpty() ? new JSONObject() : new JSONObject(resp);
         } catch (JSONException e) {
             throw new MPException(e);
@@ -219,8 +201,9 @@ public class MPExport {
     }
 
     private JSONArray doRequestJSONArray(String path, Map<String, Object> params) throws MPException {
+
         try {
-            String resp = doRequest(path, params);
+            String resp = doRequest(path, params).next();
             return resp == null || resp.trim().isEmpty() ? new JSONArray() : new JSONArray(resp);
         } catch (JSONException e) {
             throw new MPException(e);
@@ -228,46 +211,28 @@ public class MPExport {
     }
 
     @SuppressWarnings("deprecation")
-    private String doRequest(String path, Map<String, Object> params) throws MPException {
-
-        HttpClient httpclient = new DefaultHttpClient();
+    private StreamIterator doRequest(String path, Map<String, Object> params) throws MPException {
 
         List<NameValuePair> queryParams = new ArrayList<NameValuePair>();
+
         for (Map.Entry<String, Object> param : params.entrySet()) {
             queryParams.add(new BasicNameValuePair(param.getKey(), param.getValue().toString()));
         }
-        try {
-            queryParams.add(new BasicNameValuePair("sig", sig(params)));
-        } catch (Throwable e) {
-            throw new MPException(e);
-        }
 
         try {
+            queryParams.add(new BasicNameValuePair("sig", sig(params)));
 
             URI uri = URIUtils.createURI("http",
                     path.equals("export") ? MPConfig.EXPORT_RAW_BASE_ENDPOINT : MPConfig.EXPORT_BASE_ENDPOINT,
-                    -1, "/" + path,
-                    URLEncodedUtils.format(queryParams, "UTF-8"), null
-            );
+                    -1,
+                    "/" + path,
+                    URLEncodedUtils.format(queryParams, "UTF-8"),
+                    null);
 
             log.debug("Mixpanel request uri: " + uri.toString());
-            HttpGet httpGet = new HttpGet(uri);
 
-            HttpResponse response = httpclient.execute(httpGet);
-            HttpEntity entity = response.getEntity();
+            return new StreamIterator(uri);
 
-            String result = StringUtils.inputStreamToString(entity.getContent());
-
-            if (response.getStatusLine().getStatusCode() != 200) {
-                throw new MPException(result);
-            }
-
-            if (result.contains("'error':")) {
-                JSONObject responseJson = new JSONObject(result);
-                throw new MPException(responseJson.getString("error"), responseJson.getString("request"));
-            }
-
-            return result;
         } catch (Throwable e) {
             throw new MPException(e);
         }
